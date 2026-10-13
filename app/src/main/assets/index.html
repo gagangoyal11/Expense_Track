@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Labour & Expense Manager Pro</title>
+  
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .tab-active { border-bottom: 2px solid #2563eb; color: #2563eb; font-weight: 600; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 pb-20">
+
+  <!-- Top App Bar -->
+  <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-20 flex justify-between items-center">
+    <div>
+      <h1 class="text-lg font-bold">Labour & Site Manager</h1>
+      <p class="text-xs text-blue-100" id="syncStatus">Syncing...</p>
+    </div>
+    <!-- Active User Selector -->
+    <div class="flex items-center space-x-2 bg-blue-700 px-3 py-1.5 rounded-lg text-sm">
+      <i data-lucide="user-check" class="w-4 h-4 text-emerald-300"></i>
+      <select id="currentUser" class="bg-transparent text-white font-medium focus:outline-none">
+        <option value="Partner A" class="text-slate-800">User: Partner A</option>
+        <option value="Partner B" class="text-slate-800">User: Partner B</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <nav class="flex border-b border-slate-200 bg-white sticky top-[65px] z-10 text-sm">
+    <button onclick="switchTab('labour')" id="tab-labour" class="flex-1 py-3 text-center tab-active">Labour</button>
+    <button onclick="switchTab('attendance')" id="tab-attendance" class="flex-1 py-3 text-center text-slate-500">Attendance</button>
+    <button onclick="switchTab('expense')" id="tab-expense" class="flex-1 py-3 text-center text-slate-500">Expense/Pay</button>
+    <button onclick="switchTab('monthly')" id="tab-monthly" class="flex-1 py-3 text-center text-slate-500">Hisaab & Export</button>
+  </nav>
+
+  <!-- TAB 1: LABOUR MANAGEMENT -->
+  <main id="section-labour" class="p-4 space-y-4">
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+      <h2 class="text-md font-bold text-slate-800 mb-3 flex items-center gap-2">
+        <i data-lucide="user-plus" class="w-4 h-4 text-blue-600"></i> Naya Labour Add Karein
+      </h2>
+      <div class="space-y-3">
+        <input type="text" id="labourName" placeholder="Labour Name" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+        <div class="grid grid-cols-2 gap-3">
+          <select id="labourRole" class="border border-slate-300 rounded-lg p-2.5 text-sm outline-none">
+            <option value="Mistri">Mistri (Master)</option>
+            <option value="Helper">Helper / Mazdoor</option>
+            <option value="Electrician">Electrician</option>
+            <option value="Supervisor">Supervisor</option>
+          </select>
+          <input type="number" id="labourWage" placeholder="Daily Wage (₹)" class="border border-slate-300 rounded-lg p-2.5 text-sm outline-none" />
+        </div>
+        <button onclick="addLabour()" class="w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-blue-700 transition">Save Labour</button>
+      </div>
+    </div>
+
+    <!-- Labour List -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="p-3 bg-slate-100 border-b border-slate-200 font-bold text-xs uppercase text-slate-600">Registered Labours</div>
+      <div id="labourList" class="divide-y divide-slate-100"></div>
+    </div>
+  </main>
+
+  <!-- TAB 2: DAILY ATTENDANCE -->
+  <main id="section-attendance" class="p-4 space-y-4 hidden">
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+      <label class="text-sm font-semibold">Select Date:</label>
+      <input type="date" id="attDate" class="border border-slate-300 rounded-lg p-2 text-sm" onchange="loadAttendance()" />
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="p-3 bg-slate-100 border-b border-slate-200 font-bold text-xs uppercase text-slate-600">Attendance Register</div>
+      <div id="attendanceList" class="divide-y divide-slate-100"></div>
+    </div>
+    <button onclick="saveAttendance()" class="w-full bg-emerald-600 text-white font-semibold py-3 rounded-xl shadow-sm hover:bg-emerald-700">Save Daily Attendance</button>
+  </main>
+
+  <!-- TAB 3: EXPENSE & PAYMENT -->
+  <main id="section-expense" class="p-4 space-y-4 hidden">
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
+      <h2 class="text-md font-bold text-slate-800 flex items-center gap-2">
+        <i data-lucide="receipt" class="w-4 h-4 text-blue-600"></i> Naya Kharcha / Labour Payment
+      </h2>
+      <select id="expenseType" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none" onchange="toggleExpenseFields()">
+        <option value="General">Site Kharcha (Fuel, Tea, Tools, Repair, Food)</option>
+        <option value="LabourPay">Labour Payment / Advance</option>
+      </select>
+
+      <!-- Site Expense Category -->
+      <div id="categoryWrap">
+        <select id="expenseCategory" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none">
+          <option value="Tea">Chai & Snacks</option>
+          <option value="Fuel">Fuel / Diesel</option>
+          <option value="Food">Food / Lunch</option>
+          <option value="Tools">Tools & Equipment</option>
+          <option value="Repair">Repair & Maintenance</option>
+          <option value="Material">Local Materials</option>
+          <option value="Other">Other Expenses</option>
+        </select>
+      </div>
+
+      <!-- Labour Selector for Payment -->
+      <div id="labourSelectWrap" class="hidden">
+        <select id="expenseLabour" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none"></select>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <input type="number" id="expenseAmount" placeholder="Amount (₹)" class="border border-slate-300 rounded-lg p-2.5 text-sm outline-none" />
+        <input type="date" id="expenseDate" class="border border-slate-300 rounded-lg p-2.5 text-sm outline-none" />
+      </div>
+
+      <input type="text" id="expenseNote" placeholder="Remarks / Description (Optional)" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none" />
+
+      <button onclick="addExpense()" class="w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg text-sm hover:bg-blue-700">Record Payment</button>
+    </div>
+
+    <!-- Expense Entries -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="p-3 bg-slate-100 border-b border-slate-200 font-bold text-xs uppercase text-slate-600">Recent Transactions</div>
+      <div id="expenseList" class="divide-y divide-slate-100"></div>
+    </div>
+  </main>
+
+  <!-- TAB 4: MONTHLY HISAAB & EXPORT -->
+  <main id="section-monthly" class="p-4 space-y-4 hidden">
+    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+      <label class="text-sm font-semibold">Select Month:</label>
+      <input type="month" id="reportMonth" class="border border-slate-300 rounded-lg p-2 text-sm" onchange="renderMonthlyHisaab()" />
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 gap-3">
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+        <p class="text-xs text-slate-500 font-medium">Total Labour Dues</p>
+        <p id="totalLabourDues" class="text-lg font-bold text-slate-900 mt-1">₹0</p>
+      </div>
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+        <p class="text-xs text-slate-500 font-medium">Total Site Kharcha</p>
+        <p id="totalGeneralExp" class="text-lg font-bold text-rose-600 mt-1">₹0</p>
+      </div>
+    </div>
+
+    <!-- Hisaab Table -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead class="bg-slate-100 text-slate-600 uppercase font-bold">
+          <tr>
+            <th class="p-2.5 border-b">Labour</th>
+            <th class="p-2.5 border-b">Present Days</th>
+            <th class="p-2.5 border-b">Total Earning</th>
+            <th class="p-2.5 border-b">Paid Advance</th>
+            <th class="p-2.5 border-b text-right">Balance</th>
+          </tr>
+        </thead>
+        <tbody id="hisaabTableBody" class="divide-y divide-slate-100"></tbody>
+      </table>
+    </div>
+
+    <!-- Export Action Buttons -->
+    <div class="grid grid-cols-2 gap-3 pt-2">
+      <button onclick="exportToExcel()" class="bg-emerald-700 text-white py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 shadow-sm">
+        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Export to Excel
+      </button>
+      <button onclick="exportToTallyXML()" class="bg-amber-600 text-white py-3 rounded-xl font-medium text-sm flex items-center justify-center gap-2 shadow-sm">
+        <i data-lucide="file-code" class="w-4 h-4"></i> Export to Tally
+      </button>
+    </div>
+  </main>
+
+  <script>
+    // --- 1. FIREBASE INITIALIZATION ---
+    // Yahan apna Firebase Config replace karein
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "SENDER_ID",
+      appId: "APP_ID"
+    };
+
+    let db;
+    let labours = [];
+    let attendances = {};
+    let expenses = [];
+
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+      document.getElementById('syncStatus').innerText = "Online Cloud Sync Active";
+      initRealtimeSync();
+    } catch(e) {
+      document.getElementById('syncStatus').innerText = "Local Mode (Offline/Demo)";
+      loadLocalData();
+    }
+
+    // Default dates setup
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('attDate').value = today;
+    document.getElementById('expenseDate').value = today;
+    document.getElementById('reportMonth').value = today.slice(0, 7);
+
+    // --- 2. FIRESTORE SYNC & LOGIC ---
+    function initRealtimeSync() {
+      // Sync Labours
+      db.collection("labours").onSnapshot(snapshot => {
+        labours = [];
+        snapshot.forEach(doc => labours.push({ id: doc.id, ...doc.data() }));
+        renderLabours();
+        renderAttendanceList();
+        populateLabourSelect();
+      });
+
+      // Sync Attendance
+      db.collection("attendance").onSnapshot(snapshot => {
+        attendances = {};
+        snapshot.forEach(doc => { attendances[doc.id] = doc.data(); });
+        loadAttendance();
+      });
+
+      // Sync Expenses
+      db.collection("expenses").orderBy("date", "desc").onSnapshot(snapshot => {
+        expenses = [];
+        snapshot.forEach(doc => expenses.push({ id: doc.id, ...doc.data() }));
+        renderExpenses();
+        renderMonthlyHisaab();
+      });
+    }
+
+    function loadLocalData() {
+      labours = JSON.parse(localStorage.getItem('labours') || '[]');
+      attendances = JSON.parse(localStorage.getItem('attendances') || '{}');
+      expenses = JSON.parse(localStorage.getItem('expenses') || '[]');
+      renderLabours();
+      renderAttendanceList();
+      populateLabourSelect();
+      renderExpenses();
+      renderMonthlyHisaab();
+    }
+
+    function saveLocal() {
+      localStorage.setItem('labours', JSON.stringify(labours));
+      localStorage.setItem('attendances', JSON.stringify(attendances));
+      localStorage.setItem('expenses', JSON.stringify(expenses));
+    }
+
+    // --- 3. LABOUR CRUD ---
+    async function addLabour() {
+      const name = document.getElementById('labourName').value.trim();
+      const role = document.getElementById('labourRole').value;
+      const wage = parseFloat(document.getElementById('labourWage').value) || 0;
+
+      if (!name) return alert("Labour name daalein");
+
+      const item = { name, role, wage, createdAt: Date.now() };
+
+      if (db) {
+        await db.collection("labours").add(item);
+      } else {
+        item.id = Date.now().toString();
+        labours.push(item);
+        saveLocal();
+        renderLabours();
+      }
+
+      document.getElementById('labourName').value = '';
+      document.getElementById('labourWage').value = '';
+    }
+
+    async function deleteLabour(id) {
+      if (!confirm("Kya aap ise delete karna chahte hain?")) return;
+      if (db) {
+        await db.collection("labours").doc(id).delete();
+      } else {
+        labours = labours.filter(l => l.id !== id);
+        saveLocal();
+        renderLabours();
+      }
+    }
+
+    function renderLabours() {
+      const list = document.getElementById('labourList');
+      if (labours.length === 0) {
+        list.innerHTML = `<div class="p-4 text-center text-slate-400 text-sm">Koi labour add nahi hai</div>`;
+        return;
+      }
+      list.innerHTML = labours.map(l => `
+        <div class="p-3.5 flex justify-between items-center hover:bg-slate-50">
+          <div>
+            <p class="font-semibold text-slate-900 text-sm">${l.name}</p>
+            <p class="text-xs text-slate-500">${l.role} • ₹${l.wage}/din</p>
+          </div>
+          <button onclick="deleteLabour('${l.id}')" class="text-rose-500 hover:text-rose-700 p-2">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    // --- 4. ATTENDANCE ---
+    function renderAttendanceList() {
+      const container = document.getElementById('attendanceList');
+      const curDate = document.getElementById('attDate').value;
+      const record = attendances[curDate] || {};
+
+      if (labours.length === 0) {
+        container.innerHTML = `<div class="p-4 text-center text-slate-400 text-sm">Pehle labour add karein</div>`;
+        return;
+      }
+
+      container.innerHTML = labours.map(l => {
+        const status = record[l.id] || "P";
+        return `
+          <div class="p-3 flex items-center justify-between">
+            <div>
+              <p class="font-semibold text-sm">${l.name}</p>
+              <p class="text-xs text-slate-500">${l.role}</p>
+            </div>
+            <div class="flex gap-1.5" id="att-btn-group-${l.id}">
+              <button onclick="setAttBtn('${l.id}', 'P')" class="px-2.5 py-1 text-xs rounded border ${status === 'P' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'}">P (1)</button>
+              <button onclick="setAttBtn('${l.id}', 'HD')" class="px-2.5 py-1 text-xs rounded border ${status === 'HD' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-600 border-slate-300'}">Half (0.5)</button>
+              <button onclick="setAttBtn('${l.id}', 'A')" class="px-2.5 py-1 text-xs rounded border ${status === 'A' ? 'bg-rose-500 text-white border-rose-500' : 'bg-white text-slate-600 border-slate-300'}">A (0)</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function setAttBtn(labourId, status) {
+      const group = document.getElementById(`att-btn-group-${labourId}`);
+      Array.from(group.children).forEach(btn => {
+        btn.className = "px-2.5 py-1 text-xs rounded border bg-white text-slate-600 border-slate-300";
+      });
+      event.target.className = `px-2.5 py-1 text-xs rounded border text-white ${
+        status === 'P' ? 'bg-emerald-600 border-emerald-600' :
+        status === 'HD' ? 'bg-amber-500 border-amber-500' : 'bg-rose-500 border-rose-500'
+      }`;
+      event.target.dataset.selected = status;
+    }
+
+    async function saveAttendance() {
+      const date = document.getElementById('attDate').value;
+      const dailyRecord = {};
+
+      labours.forEach(l => {
+        const group = document.getElementById(`att-btn-group-${l.id}`);
+        const active = group.querySelector('.text-white');
+        const code = active ? active.innerText.split(' ')[0] : 'P';
+        dailyRecord[l.id] = code;
+      });
+
+      if (db) {
+        await db.collection("attendance").doc(date).set(dailyRecord);
+      } else {
+        attendances[date] = dailyRecord;
+        saveLocal();
+      }
+      alert("Attendance Saved!");
+      renderMonthlyHisaab();
+    }
+
+    function loadAttendance() {
+      renderAttendanceList();
+    }
+
+    // --- 5. EXPENSES & PAYMENT ---
+    function toggleExpenseFields() {
+      const type = document.getElementById('expenseType').value;
+      if (type === 'LabourPay') {
+        document.getElementById('labourSelectWrap').classList.remove('hidden');
+        document.getElementById('categoryWrap').classList.add('hidden');
+      } else {
+        document.getElementById('labourSelectWrap').classList.add('hidden');
+        document.getElementById('categoryWrap').classList.remove('hidden');
+      }
+    }
+
+    function populateLabourSelect() {
+      const sel = document.getElementById('expenseLabour');
+      sel.innerHTML = labours.map(l => `<option value="${l.id}">${l.name} (${l.role})</option>`).join('');
+    }
+
+    async function addExpense() {
+      const type = document.getElementById('expenseType').value;
+      const amount = parseFloat(document.getElementById('expenseAmount').value) || 0;
+      const date = document.getElementById('expenseDate').value;
+      const note = document.getElementById('expenseNote').value.trim();
+      const enteredBy = document.getElementById('currentUser').value;
+
+      if (amount <= 0) return alert("Amount daalein");
+
+      let payload = {
+        type,
+        amount,
+        date,
+        note,
+        paidBy: enteredBy,
+        timestamp: Date.now()
+      };
+
+      if (type === 'LabourPay') {
+        const lId = document.getElementById('expenseLabour').value;
+        const labObj = labours.find(x => x.id === lId);
+        payload.labourId = lId;
+        payload.labourName = labObj ? labObj.name : 'Unknown';
+        payload.title = `Payment to: ${payload.labourName}`;
+      } else {
+        payload.category = document.getElementById('expenseCategory').value;
+        payload.title = `${payload.category} Expense`;
+      }
+
+      if (db) {
+        await db.collection("expenses").add(payload);
+      } else {
+        payload.id = Date.now().toString();
+        expenses.unshift(payload);
+        saveLocal();
+        renderExpenses();
+        renderMonthlyHisaab();
+      }
+
+      document.getElementById('expenseAmount').value = '';
+      document.getElementById('expenseNote').value = '';
+    }
+
+    function renderExpenses() {
+      const list = document.getElementById('expenseList');
+      if (expenses.length === 0) {
+        list.innerHTML = `<div class="p-4 text-center text-slate-400 text-sm">Koi payment entry nahi hai</div>`;
+        return;
+      }
+
+      list.innerHTML = expenses.map(e => `
+        <div class="p-3.5 flex justify-between items-start hover:bg-slate-50">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-sm text-slate-800">${e.title}</span>
+              <span class="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Paid by: ${e.paidBy}</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">${e.date} ${e.note ? '• ' + e.note : ''}</p>
+          </div>
+          <p class="font-bold text-sm text-slate-900">₹${e.amount}</p>
+        </div>
+      `).join('');
+    }
+
+    // --- 6. MONTHLY HISAAB & SUMMARY ---
+    function renderMonthlyHisaab() {
+      const targetMonth = document.getElementById('reportMonth').value; // YYYY-MM
+      let totalEarnedAll = 0;
+      let totalGeneral = 0;
+
+      // Filter general expenses for selected month
+      expenses.forEach(e => {
+        if (e.date.startsWith(targetMonth) && e.type === 'General') {
+          totalGeneral += e.amount;
+        }
+      });
+
+      const rows = labours.map(l => {
+        let daysPresent = 0;
+        // Count attendance days
+        Object.keys(attendances).forEach(d => {
+          if (d.startsWith(targetMonth)) {
+            const status = attendances[d][l.id];
+            if (status === 'P') daysPresent += 1.0;
+            if (status === 'HD') daysPresent += 0.5;
+          }
+        });
+
+        const totalEarned = daysPresent * (l.wage || 0);
+        totalEarnedAll += totalEarned;
+
+        // Total advance paid to this labour
+        let advancePaid = 0;
+        expenses.forEach(e => {
+          if (e.date.startsWith(targetMonth) && e.type === 'LabourPay' && e.labourId === l.id) {
+            advancePaid += e.amount;
+          }
+        });
+
+        const balance = totalEarned - advancePaid;
+
+        return `
+          <tr class="hover:bg-slate-50">
+            <td class="p-2.5 font-medium">${l.name}</td>
+            <td class="p-2.5">${daysPresent}</td>
+            <td class="p-2.5">₹${totalEarned}</td>
+            <td class="p-2.5 text-rose-600">₹${advancePaid}</td>
+            <td class="p-2.5 font-bold text-right ${balance > 0 ? 'text-amber-600' : 'text-emerald-600'}">₹${balance}</td>
+          </tr>
+        `;
+      });
+
+      document.getElementById('hisaabTableBody').innerHTML = rows.join('');
+      document.getElementById('totalLabourDues').innerText = `₹${totalEarnedAll}`;
+      document.getElementById('totalGeneralExp').innerText = `₹${totalGeneral}`;
+    }
+
+    // --- 7. EXPORT OPTIONS ---
+    function exportToExcel() {
+      const targetMonth = document.getElementById('reportMonth').value;
+      const exportData = [];
+
+      labours.forEach(l => {
+        let days = 0;
+        Object.keys(attendances).forEach(d => {
+          if (d.startsWith(targetMonth)) {
+            const st = attendances[d][l.id];
+            if (st === 'P') days += 1;
+            if (st === 'HD') days += 0.5;
+          }
+        });
+        const earned = days * (l.wage || 0);
+        let advance = 0;
+        expenses.forEach(e => {
+          if (e.date.startsWith(targetMonth) && e.type === 'LabourPay' && e.labourId === l.id) {
+            advance += e.amount;
+          }
+        });
+        exportData.push({
+          "Labour Name": l.name,
+          "Role": l.role,
+          "Daily Wage": l.wage,
+          "Present Days": days,
+          "Total Wages": earned,
+          "Advance Paid": advance,
+          "Net Balance": earned - advance
+        });
+      });
+
+      const ws1 = XLSX.utils.json_to_sheet(exportData);
+      const ws2 = XLSX.utils.json_to_sheet(expenses.filter(e => e.date.startsWith(targetMonth)));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws1, "Labour Hisaab");
+      XLSX.utils.book_append_sheet(wb, ws2, "Site Expenses");
+
+      XLSX.writeFile(wb, `Labour_Expense_${targetMonth}.xlsx`);
+    }
+
+    function exportToTallyXML() {
+      const targetMonth = document.getElementById('reportMonth').value;
+      const monthExpenses = expenses.filter(e => e.date.startsWith(targetMonth));
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<ENVELOPE>\n  <HEADER>\n    <TALLYREQUEST>Import Data</TALLYREQUEST>\n  </HEADER>\n  <BODY>\n    <IMPORTDATA>\n      <REQUESTDESC>\n        <REPORTNAME>Vouchers</REPORTNAME>\n      </REQUESTDESC>\n      <REQUESTDATA>\n`;
+
+      monthExpenses.forEach(e => {
+        const tallyDate = e.date.replace(/-/g, '');
+        xml += `
+        <TALLYMESSAGE xmlns:UDF="TallyUDF">
+          <VOUCHER VCHTYPE="Payment" ACTION="Create">
+            <DATE>${tallyDate}</DATE>
+            <NARRATION>${e.title} - Paid by ${e.paidBy}. Remarks: ${e.note || ''}</NARRATION>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>${e.title}</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>Yes</ISDEEMEDPOSITIVE>
+              <AMOUNT>-${e.amount}</AMOUNT>
+            </ALLLEDGERENTRIES.LIST>
+            <ALLLEDGERENTRIES.LIST>
+              <LEDGERNAME>Cash</LEDGERNAME>
+              <ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>
+              <AMOUNT>${e.amount}</AMOUNT>
+            </ALLLEDGERENTRIES.LIST>
+          </VOUCHER>
+        </TALLYMESSAGE>`;
+      });
+
+      xml += `\n      </REQUESTDATA>\n    </IMPORTDATA>\n  </BODY>\n</ENVELOPE>`;
+
+      const blob = new Blob([xml], { type: "text/xml;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `Tally_Payment_Vouchers_${targetMonth}.xml`;
+      link.click();
+    }
+
+    // --- Navigation Switcher ---
+    function switchTab(tab) {
+      ['labour', 'attendance', 'expense', 'monthly'].forEach(t => {
+        document.getElementById(`section-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).className = 'flex-1 py-3 text-center text-slate-500';
+      });
+      document.getElementById(`section-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).className = 'flex-1 py-3 text-center tab-active';
+    }
+
+    lucide.createIcons();
+  </script>
+</body>
+</html>
